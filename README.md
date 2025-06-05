@@ -160,7 +160,9 @@ from src.models.strategy_optimizer import PitStopOptimizer, RaceState
 
 # Load trained model
 model = TireDegradationModel()
-model.load()
+if not model.load():
+    print("Failed to load model")
+    exit()
 
 # Create optimizer
 optimizer = PitStopOptimizer(model)

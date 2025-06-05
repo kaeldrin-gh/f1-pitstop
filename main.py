@@ -153,23 +153,24 @@ class F1StrategyApp:
                 
                 # Train model
                 train_metrics = self.tire_model.fit(X_train, y_train)
-                
-                # Evaluate model
+                  # Evaluate model
                 if not X_test.empty and not y_test.empty:
                     test_metrics = self.tire_model.evaluate(X_test, y_test)
                     
                     # Check performance requirements
-                    if test_metrics['test_r2'] < 0.75:
-                        logger.warning(f"Model R² ({test_metrics['test_r2']:.4f}) below target (0.75)")
-                    
-                    if test_metrics['test_mae'] > 0.5:
-                        logger.warning(f"Model MAE ({test_metrics['test_mae']:.4f}) above target (0.5)")
+                    if test_metrics['r2_score'] < 0.75:
+                        logger.warning(f"Model R² ({test_metrics['r2_score']:.4f}) below target (0.75)")
+                    if test_metrics['mae'] > 0.5:
+                        logger.warning(f"Model MAE ({test_metrics['mae']:.4f}) above target (0.5)")
                 else:
                     logger.warning("No test data available for evaluation")
                 
                 # Save model
-                if not self.tire_model.save():
-                    logger.error("Failed to save trained model")
+                try:
+                    saved_path = self.tire_model.save()
+                    logger.info(f"Model saved successfully to {saved_path}")
+                except Exception as e:
+                    logger.error(f"Failed to save trained model: {e}")
                     return False
             
             # Initialize strategy optimizer
@@ -236,12 +237,11 @@ class F1StrategyApp:
                 for age in [5, 15, 25]:
                     degradation = self.tire_model.predict_tire_degradation(compound, age)
                     logger.info(f"  {compound} at {age} laps: {degradation:.3f}s")
-            
-            # Feature importance
-            importance = self.tire_model.get_feature_importance(5)
+              # Feature importance
+            importance_df = self.tire_model.get_feature_importance(5)
             logger.info("Top 5 feature importance:")
-            for feature, score in importance.items():
-                logger.info(f"  {feature}: {score:.4f}")
+            for _, row in importance_df.iterrows():
+                logger.info(f"  {row['feature']}: {row['importance']:.4f}")
             
             logger.info("Analysis completed successfully")
             

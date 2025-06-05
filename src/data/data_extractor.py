@@ -143,11 +143,14 @@ class F1DataExtractor:
             if valid_laps.empty:
                 logger.warning(f"No valid laps found for {year} {circuit}")
                 return None
-            
-            # Process lap data
+              # Process lap data
             race_data = []
             for _, lap in valid_laps.iterrows():
                 try:
+                    # Calculate gap to leader based on position (simplified approach)
+                    position = lap['Position'] if pd.notna(lap['Position']) else 20
+                    gap_to_leader = (position - 1) * 0.5  # Rough estimate: 0.5s per position
+                    
                     race_data.append({
                         'year': year,
                         'circuit': circuit,
@@ -157,8 +160,8 @@ class F1DataExtractor:
                         'tire_compound': lap['Compound'],
                         'tire_age': lap['TyreLife'],
                         'track_status': lap['TrackStatus'],
-                        'position': lap['Position'],
-                        'gap_to_leader': lap['GapToLeader']
+                        'position': position,
+                        'gap_to_leader': gap_to_leader
                     })
                 except Exception as e:
                     logger.warning(f"Error processing lap: {e}")

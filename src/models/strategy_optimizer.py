@@ -213,7 +213,6 @@ class PitStopOptimizer:
             confidence -= 0.2  # Less predictable at race end
         
         return max(0.0, min(1.0, confidence))
-    
     def simulate_race_strategies(self, race_state: RaceState, 
                                strategies: List[List[PitStop]], 
                                circuit: str = 'silverstone') -> List[Strategy]:
@@ -236,9 +235,9 @@ class PitStopOptimizer:
             try:
                 result = self._simulate_single_strategy(race_state, pit_stops, circuit)
                 simulated_strategies.append(result)
-                logger.info(f"Strategy {i+1}: Total time {result.total_time:.3f}s, "
-                           f"Position {result.final_position}, "
-                           f"Confidence {result.confidence_score:.3f}")
+                # Only log every 5th strategy to reduce verbosity
+                if (i + 1) % 5 == 0 or i == len(strategies) - 1:
+                    logger.debug(f"Completed strategy {i+1}/{len(strategies)}: Total time {result.total_time:.3f}s")
             except Exception as e:
                 logger.error(f"Failed to simulate strategy {i+1}: {e}")
                 continue

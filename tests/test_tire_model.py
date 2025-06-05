@@ -197,7 +197,6 @@ class TestTireDegradationModel(unittest.TestCase):
         self.assertIn('model', saved_data)
         self.assertIn('feature_columns', saved_data)
         self.assertIn('training_metrics', saved_data)
-    
     def test_save_model_without_training(self):
         """Test saving untrained model raises error."""
         model_path = os.path.join(self.temp_dir, 'test_model.pkl')
@@ -216,23 +215,25 @@ class TestTireDegradationModel(unittest.TestCase):
         
         # Create new model instance and load
         new_model = TireDegradationModel()
-        new_model.load(model_path)
+        result = new_model.load(model_path)
+        
+        # Should return True for successful load
+        self.assertTrue(result)
         
         # Test loaded model works
         loaded_predictions = new_model.predict(self.X_test)
-        
-        # Predictions should be identical
+          # Predictions should be identical
         np.testing.assert_array_almost_equal(original_predictions, loaded_predictions)
         
         # Feature columns should match
         self.assertEqual(self.model.feature_columns, new_model.feature_columns)
     
     def test_load_nonexistent_model(self):
-        """Test loading from nonexistent file raises error."""
+        """Test loading from nonexistent file returns False."""
         nonexistent_path = os.path.join(self.temp_dir, 'nonexistent.pkl')
         
-        with self.assertRaises(FileNotFoundError):
-            self.model.load(nonexistent_path)
+        result = self.model.load(nonexistent_path)
+        self.assertFalse(result)
     
     def test_get_feature_importance(self):
         """Test getting feature importance from trained model."""
