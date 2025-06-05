@@ -6,6 +6,7 @@ Optimizes pit stop strategies using tire degradation models and race simulation
 import logging
 import pandas as pd
 import numpy as np
+import random
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 from src.models.tire_model import TireDegradationModel
@@ -149,8 +150,7 @@ class PitStopOptimizer:
         
         # Pit stop time
         pit_time = config.PIT_STOP_PENALTY
-        
-        # Time on new tires until end
+          # Time on new tires until end
         new_stint_time = 0
         remaining_laps = race_state.total_laps - pit_lap
         for lap in range(remaining_laps):
@@ -158,16 +158,34 @@ class PitStopOptimizer:
             new_stint_time += lap_time
         
         return current_stint_time + pit_time + new_stint_time
-    
+
     def _predict_lap_time(self, compound: str, tire_age: int, circuit: str) -> float:
         """Predict lap time using the tire model"""
         try:
             return self.tire_model.predict_tire_degradation(compound, tire_age, circuit)
         except Exception:
-            # Fallback to simple degradation calculation
-            base_time = 90.0  # Base lap time
-            degradation = tire_age * config.TIRE_DEGRADATION_RATES.get(compound, 0.25)
-            return base_time + degradation
+            # Fallback to realistic degradation calculation
+            # Circuit-specific base times (consistent with _get_circuit_baseline_laptime)
+            base_time = self._get_circuit_baseline_laptime(circuit)
+            
+            # More realistic tire compound characteristics
+            compound_modifiers = {
+                'SOFT': {'base_modifier': -0.8, 'degradation_rate': 0.025},  # Faster but degrades more
+                'MEDIUM': {'base_modifier': 0.0, 'degradation_rate': 0.018},  # Baseline performance
+                'HARD': {'base_modifier': 0.6, 'degradation_rate': 0.010}    # Slower but consistent
+            }
+            
+            compound_data = compound_modifiers.get(compound, compound_modifiers['MEDIUM'])
+            
+            # Calculate lap time with more moderate degradation
+            # Include some variability to simulate driver performance, traffic, etc.
+            base_lap_time = (base_time + compound_data['base_modifier'])
+            degradation = tire_age * compound_data['degradation_rate']
+            variability = random.uniform(-0.2, 0.3)  # Slight random variation
+            
+            lap_time = base_lap_time + degradation + variability
+            
+            return lap_time
     
     def _calculate_tire_advantage(self, current_compound: str, 
                                 new_compound: str, remaining_laps: int) -> float:
@@ -244,7 +262,6 @@ class PitStopOptimizer:
         
         # Sort by total time
         simulated_strategies.sort(key=lambda x: x.total_time)
-        
         return simulated_strategies
     
     def _simulate_single_strategy(self, race_state: RaceState, 
@@ -260,6 +277,9 @@ class PitStopOptimizer:
         pit_stops = sorted(pit_stops, key=lambda x: x.lap)
         pit_lap_index = 0
         
+        # Track cumulative position changes for more realistic simulation
+        position_changes = []
+        
         # Simulate each lap
         for lap in range(race_state.current_lap, race_state.total_laps + 1):
             # Check for pit stop
@@ -268,45 +288,90 @@ class PitStopOptimizer:
                 
                 pit_stop = pit_stops[pit_lap_index]
                 total_time += pit_stop.pit_time
+                
+                # Position loss during pit stop (more realistic calculation)
+                pit_position_loss = self._calculate_pit_stop_position_loss(
+                    current_position, pit_stop.pit_time, race_state
+                )
+                current_position += pit_position_loss
+                current_position = max(1, min(20, current_position))
+                
                 current_tire = pit_stop.tire_compound_in
                 current_tire_age = 0
-                current_position += self._estimate_position_loss(race_state)
                 pit_lap_index += 1
             
             # Simulate lap time
             lap_time = self._predict_lap_time(current_tire, current_tire_age, circuit)
             total_time += lap_time
             current_tire_age += 1
-            
-            # Update position based on relative performance
+              # Update position based on relative performance (less aggressive changes)
+            old_position = current_position
             current_position = self._update_position(
-                current_position, lap_time, race_state
+                current_position, lap_time, race_state, circuit
             )
-        
-        # Calculate confidence and risk
+            
+            # Track position change for analysis
+            if old_position != current_position:
+                position_changes.append(current_position - old_position)
+          # Calculate confidence and risk
         confidence = self._calculate_strategy_confidence(pit_stops, race_state)
         risk_level = self._assess_risk_level(pit_stops, race_state)
+        
+        # Final position should be more conservative - don't allow dramatic improvements
+        final_position = max(1, min(20, current_position))
         
         return Strategy(
             pit_stops=pit_stops,
             total_time=total_time,
-            final_position=max(1, current_position),
+            final_position=final_position,
             confidence_score=confidence,
             risk_level=risk_level
         )
-    
+
     def _update_position(self, current_position: int, lap_time: float, 
-                        race_state: RaceState) -> int:
+                        race_state: RaceState, circuit: str = 'silverstone') -> int:
         """Update position based on relative performance"""
-        # Simplified position calculation
-        base_lap_time = 90.0
+        # Use consistent baseline with _predict_lap_time method
+        base_lap_time = self._get_circuit_baseline_laptime(circuit)
         time_delta = lap_time - base_lap_time
         
-        # Assume 1 second = 1 position change
-        position_change = int(time_delta)
-        new_position = current_position + position_change
+        # Much more conservative position changes - F1 fields are very close
+        # Every 1.0 seconds difference = approximately 1 position change
+        # This reflects that small lap time differences don't always translate to position changes
+        if abs(time_delta) < 0.3:
+            # Very small differences - no position change most of the time
+            position_change = 0
+            if random.random() < 0.1:  # 10% chance of small movement
+                position_change = random.choice([-1, 1])
+        else:
+            # Larger differences - more conservative calculation
+            position_change = int(time_delta / 1.0)
+            
+            # Add some randomness to simulate traffic, setup differences, etc.
+            if random.random() < 0.3:  # 30% chance of randomness
+                position_change += random.randint(-1, 1)
         
-        return max(1, min(20, new_position))  # Keep within reasonable bounds
+        # Limit position changes per lap to be very realistic (F1 is usually incremental)
+        position_change = max(-1, min(1, position_change))
+        
+        # Apply position change with some resistance based on current position
+        # Mid-field drivers (positions 8-15) have more opportunity for position changes
+        if 8 <= current_position <= 15:
+            # Mid-field - allow normal position changes
+            new_position = current_position + position_change
+        elif current_position <= 7:
+            # Front runners - harder to lose position, easier to gain
+            if position_change > 0:  # Losing position
+                position_change = max(0, position_change - 1)  # Reduce penalty
+            new_position = current_position + position_change
+        else:
+            # Back markers - harder to gain position
+            if position_change < 0:  # Gaining position
+                position_change = min(0, position_change + 1)  # Reduce gain
+            new_position = current_position + position_change
+        
+        # Keep within realistic F1 field bounds (1-20)
+        return max(1, min(20, new_position))
     
     def _calculate_strategy_confidence(self, pit_stops: List[PitStop], 
                                      race_state: RaceState) -> float:
@@ -900,8 +965,7 @@ class PitStopOptimizer:
         
         Args:
             strategy_evaluation: Strategy evaluation data
-            
-        Returns:
+              Returns:
             Performance prediction dictionary
         """
         return {
@@ -909,6 +973,44 @@ class PitStopOptimizer:
             'position_range': [8, 12],
             'success_probability': 0.78
         }
+    
+    def _get_circuit_baseline_laptime(self, circuit: str) -> float:
+        """Get baseline lap time for circuit"""
+        # Circuit-specific baseline lap times (approximate F1 lap times in seconds)
+        circuit_baselines = {
+            'silverstone': 88.0,
+            'monaco': 72.0,
+            'spa': 105.0,
+            'monza': 81.0,
+            'suzuka': 90.0,
+            'interlagos': 70.0,
+            'barcelona': 78.0
+        }
+        
+        # Default to a reasonable F1 lap time if circuit not found
+        return circuit_baselines.get(circuit, 88.0)
+    
+    def _calculate_pit_stop_position_loss(self, current_position: int, 
+                                         pit_time: float, race_state: RaceState) -> int:
+        """Calculate realistic position loss during pit stop"""
+        # Base position loss from pit stop time
+        # In F1, typical pit stop loses 20-25 seconds, which is roughly 2-4 positions
+        base_loss = max(1, int(pit_time / 8))  # Every 8 seconds ≈ 1 position
+        
+        # Adjust based on field position
+        if current_position <= 5:
+            # Top 5 positions are more tightly packed
+            base_loss += 1
+        elif current_position >= 15:
+            # Back of field has bigger gaps
+            base_loss = max(1, base_loss - 1)
+        
+        # Add some variability for traffic/undercuts
+        import random
+        traffic_factor = random.randint(0, 1)
+        
+        return min(5, base_loss + traffic_factor)  # Cap at 5 positions lost
+    
 
 def main():
     """Main function for testing the strategy optimizer"""
